@@ -1,0 +1,628 @@
+(*
+  Limceron Language — Formal Grammar (EBNF)
+  Version 0.2
+*)
+
+(* File extensions: .lcn (preferred), .lcn.md (Markdown-as-source)
+   Legacy: .lceron, .lceron.md — still supported *)
+
+(* ========== Top Level ========== *)
+
+program         = { top_level_item } ;
+top_level_item  = mod_decl
+                | use_decl
+                | fn_decl
+                | extern_fn_decl
+                | struct_decl
+                | enum_decl
+                | trait_decl
+                | interface_decl
+                | impl_block
+                | type_alias
+                | const_decl
+                | comptime_block
+                | agent_decl
+                | capability_decl
+                | guard_decl
+                | taint_decl
+                | budget_decl
+                | tool_decl
+                | skill_decl
+                | supervisor_decl
+                | mesh_decl
+                | router_decl
+                | signal_decl
+                | health_decl
+                | metrics_decl
+                | progress_decl
+                | link_decl
+                | invariant_decl
+                | policy_decl ;
+
+(* ========== Module System ========== *)
+
+mod_decl        = "mod" qualified_name ;
+use_decl        = "use" use_path
+                | "use" "mcp" "(" string_literal ")" "as" ident
+                | "use" "a2a" "(" string_literal ")" "as" ident
+                | "use" "driver" "(" string_literal ")" "as" ident
+                | "use" "model" "(" string_literal ")" "as" ident ;
+use_path        = qualified_name [ "." "{" ident { "," ident } "}" ]
+                | qualified_name "as" ident ;
+qualified_name  = ident { "." ident } ;
+
+(* ========== Functions ========== *)
+
+fn_decl         = { attribute } [ "pub" ] [ "unsafe" ] [ "comptime" ]
+                  "fn" ident [ generic_params ] "(" [ param_list ] ")"
+                  [ "->" type_expr ] block ;
+extern_fn_decl  = [ "pub" ] "extern" "fn" ident "(" [ param_list ] ")"
+                  [ "->" type_expr ] ;
+(* extern fn has no body — FFI declaration for C or other foreign functions *)
+param_list      = param { "," param } ;
+param           = ident ":" type_expr
+                | "&" [ "mut" ] "self" ;
+
+(* ========== Types ========== *)
+
+struct_decl     = { attribute } [ "pub" ] "struct" ident [ generic_params ]
+                  "{" { struct_field } "}" ;
+struct_field    = { attribute } [ "pub" | "priv" ] ident ":" type_expr ;
+
+enum_decl       = { attribute } [ "pub" ] "enum" ident [ generic_params ]
+                  "{" enum_variant { enum_variant } "}" ;
+enum_variant    = ident [ "(" field_list ")" ] ;
+field_list      = field { "," field } ;
+field           = [ ident ":" ] type_expr ;
+
+trait_decl      = { attribute } [ "pub" ] "trait" ident [ generic_params ]
+                  [ ":" trait_bound { "+" trait_bound } ]
+                  "{" { trait_item } "}" ;
+trait_item      = fn_signature [ block ] ;
+
+interface_decl  = { attribute } [ "pub" ] "interface" ident [ generic_params ]
+                  "{" { fn_signature } "}"
+                | { attribute } [ "pub" ] "interface" ident "=" type_expr
+                  { "+" type_expr } ;
+
+impl_block      = "impl" [ generic_params ] [ type_expr "for" ] type_expr
+                  "{" { fn_decl } "}" ;
+
+type_alias      = [ "pub" ] "type" ident [ generic_params ] "=" type_expr ;
+
+const_decl      = [ "pub" ] "const" ident [ ":" type_expr ] "=" expression ;
+
+fn_signature    = [ "pub" ] "fn" ident [ generic_params ]
+                  "(" [ param_list ] ")" [ "->" type_expr ] ;
+
+(* ========== Type Expressions ========== *)
+
+type_expr       = primary_type { "|" primary_type } ;
+primary_type    = ident [ generic_args ]
+                | "&" [ "mut" ] type_expr
+                | "*" [ "const" | "mut" ] type_expr
+                | "[" type_expr "]"
+                | "[" type_expr ";" expression "]"
+                | "(" type_list ")"
+                | "fn" "(" [ type_list ] ")" [ "->" type_expr ]
+                | type_expr "?" ;
+type_list       = type_expr { "," type_expr } ;
+generic_params  = "<" generic_param { "," generic_param } ">" ;
+generic_param   = ident [ ":" trait_bound { "+" trait_bound } ]
+                | "region" ident ;
+generic_args    = "<" type_expr { "," type_expr } ">" ;
+trait_bound     = qualified_name [ generic_args ] ;
+
+(* ========== Statements ========== *)
+
+block           = "{" { statement } "}" ;
+statement       = let_stmt
+                | expression
+                | return_stmt
+                | defer_stmt
+                | assignment
+                | for_loop
+                | while_loop
+                | loop_stmt
+                | break_stmt
+                | continue_stmt
+                | if_expr
+                | match_expr
+                | spawn_expr
+                | select_stmt
+                | unsafe_block
+                | comptime_block ;
+
+break_stmt      = "break" [ expression ] ;
+continue_stmt   = "continue" ;
+
+let_stmt        = "let" [ "mut" ] pattern [ ":" type_expr ] "=" expression ;
+return_stmt     = "return" [ expression ] ;
+defer_stmt      = "defer" ( expression | block ) ;
+assignment      = expression assign_op expression ;
+assign_op       = "=" | "+=" | "-=" | "*=" | "/=" | "%="
+                | "&=" | "|=" | "^=" | "<<=" | ">>=" ;
+
+(* ========== Expressions ========== *)
+
+expression      = unary_expr { binary_op unary_expr }
+                | if_expr
+                | match_expr
+                | spawn_expr
+                | closure ;
+
+unary_expr      = [ unary_op ] postfix_expr ;
+unary_op        = "-" | "!" | "~" | "&" [ "mut" ] | "*" ;
+
+postfix_expr    = primary_expr { postfix_op } ;
+postfix_op      = "." ident
+                | "." ident "(" [ arg_list ] ")"
+                | "[" expression "]"
+                | "[" [ expression ] ".." [ "=" ] [ expression ] "]"
+                | "(" [ arg_list ] ")"
+                | "?"
+                | "as" type_expr
+                | "is" type_expr ;
+
+primary_expr    = literal
+                | ident
+                | "(" expression ")"
+                | "(" expression { "," expression } ")"  (* tuple *)
+                | "[" [ expression { "," expression } ] "]"  (* array *)
+                | "#{" [ map_entry { "," map_entry } ] "}"  (* map *)
+                | qualified_name
+                | "await" expression
+                | chan_expr
+                | retry_expr
+                | task_group_expr
+                | comptime_expr
+                | block ;
+
+literal         = int_literal
+                | float_literal
+                | string_literal
+                | raw_string_literal
+                | char_literal
+                | "true" | "false"
+                | "none" ;
+
+closure         = "|" [ param_list_short ] "|" ( expression | block ) ;
+param_list_short = ident { "," ident } ;
+
+chan_expr        = "chan" [ "<" type_expr ">" ] [ "(" [ expression ] ")" ] ;
+
+(* ========== Control Flow ========== *)
+
+if_expr         = "if" expression block
+                  { "else" "if" expression block }
+                  [ "else" block ] ;
+
+match_expr      = "match" expression "{"
+                  { match_arm }
+                  "}" ;
+match_arm       = pattern [ "if" expression ] "->" ( expression | block ) ;
+
+for_loop        = "for" pattern [ "," pattern ] "in" expression block ;
+while_loop      = "while" expression block ;
+loop_stmt       = "loop" block ;
+
+spawn_expr      = "spawn" block ;
+
+select_stmt     = "select" "{"
+                  { select_arm }
+                  [ "default" "->" ( expression | block ) ]
+                  "}" ;
+select_arm      = ident "from" expression "->" ( expression | block ) ;
+
+unsafe_block    = "unsafe" block ;
+comptime_block  = "comptime" ( block | "if" expression block [ "else" block ] ) ;
+
+(* ========== Patterns ========== *)
+
+pattern         = "_"
+                | ident
+                | literal
+                | ident ":" type_expr
+                | qualified_name [ "(" [ pattern { "," pattern } ] ")" ]
+                | qualified_name "{" [ field_pattern { "," field_pattern } ] "}"
+                | "(" pattern { "," pattern } ")"
+                | pattern ".." [ "=" ] pattern
+                | pattern "|" pattern ;
+field_pattern   = ident [ ":" pattern ] ;
+
+(* ========== Arguments ========== *)
+
+arg_list        = arg { "," arg } ;
+arg             = [ ident ":" ] expression ;
+
+map_entry       = expression ":" expression ;
+
+(* ========== Attributes ========== *)
+
+attribute       = "#[" ident [ "(" attr_args ")" ] "]" ;
+attr_args       = attr_arg { "," attr_arg } ;
+attr_arg        = ident [ "=" literal ]
+                | literal ;
+(* Built-in attributes: #[test], #[inline], #[record], #[gradual], #[explicit] *)
+
+(* ========== Binary Operators (by precedence, lowest first) ========== *)
+
+binary_op       = "|>"                         (* pipe *)
+                | "||"                         (* logical or *)
+                | "&&"                         (* logical and *)
+                | "==" | "!=" | "<" | ">" | "<=" | ">="  (* comparison *)
+                | "|"                          (* bitwise or *)
+                | "^"                          (* bitwise xor *)
+                | "&"                          (* bitwise and *)
+                | "<<" | ">>"                  (* shift *)
+                | "+" | "-"                    (* additive *)
+                | "*" | "/" | "%"              (* multiplicative *)
+                | "**"                         (* exponentiation *)
+                | ".."  | "..="  ;             (* range *)
+
+(* Pipe steps may include an error-handling `or` clause *)
+pipe_or_clause  = "or" ( "return" expression
+                       | "retry" "(" expression [ "," ident ":" expression ] ")"
+                       | "fallback" "(" expression ")"
+                       | expression ) ;
+
+(* ========== Kubernetes / Observability Declarations ========== *)
+
+(* Signal handling — declares a named OS signal handler.
+   The block executes when the named signal (e.g. SIGTERM, SIGINT) is received.
+   Used for graceful shutdown orchestration in containerised agents. *)
+signal_decl     = "signal" ident "{" block "}" ;
+
+(* Health probes — Kubernetes-style liveness/readiness checks.
+   Exposes HTTP endpoints that return 200 when the expression evaluates to true.
+   Default port is 9090 if omitted. *)
+health_decl     = "health" "{" { health_field } "}" ;
+health_field    = ( "ready" | "live" ) ":" expression
+                | "port" ":" int_literal ;
+
+(* Metrics — Prometheus-style metric declarations.
+   Each metric has a kind (counter, gauge, histogram), a name, and a description.
+   An optional port field sets the HTTP scrape endpoint (default 9091). *)
+metrics_decl    = "metrics" "{" { metrics_field } "}" ;
+metrics_field   = ( "counter" | "gauge" | "histogram" ) ident string_literal
+                | "port" ":" int_literal ;
+
+(* Progress reporting — declares observable progress for long-running tasks.
+   Dashboard and supervisors can poll the total/current values. *)
+progress_decl   = "progress" "{" "total" ":" expression ","
+                  "current" ":" expression "}" ;
+
+(* FFI link directive — passes flags to the linker.
+   Equivalent to #pragma comment(lib, ...) or -l flags. *)
+link_decl       = "link" string_literal ;
+
+(* ========== Structured Concurrency & Retry ========== *)
+
+(* Retry expression — re-evaluates the body up to N times on failure.
+   The optional strategy is either "exponential" backoff or a fixed "delay"
+   in milliseconds.  Returns the first successful result. *)
+retry_expr      = "retry" int_literal [ "exponential" | "delay" int_literal ]
+                  "{" expression "}" ;
+
+(* Task group — structured concurrency scope.
+   All spawned tasks inside the block must complete (or be cancelled) before
+   the task_group expression returns.  Collects results into an array. *)
+task_group_expr = "task_group" "{" { spawn_expr } "}" ;
+
+(* Compile-time expression — evaluates a block at compile time.
+   Can appear as a top-level declaration (comptime_block) or inside
+   an expression context (comptime_expr). *)
+comptime_expr   = "comptime" "{" block "}" ;
+
+(* ========== Agent System (v0.2) ========== *)
+
+(* --- Agent Declaration --- *)
+
+agent_decl      = { attribute } [ "pub" ] "agent" ident [ generic_params ]
+                  "{" { agent_member } "}" ;
+agent_member    = agent_field
+                | agent_use
+                | guard_use
+                | fn_decl
+                | tool_decl ;
+agent_field     = "capabilities" ":" "[" capability_ref { "," capability_ref } "]"
+                | "model" ":" string_literal
+                | "budget" ":" ( ident | budget_inline )
+                | "skills" ":" "[" skill_ref { "," skill_ref } "]"
+                | "prompt" ":" ( ident | prompt_import )
+                | "memory" ":" "[" memory_ref { "," memory_ref } "]"
+                | "settings" ":" "{" { setting_field } "}"
+                | "guards" ":" "[" ident { "," ident } "]"
+                | "schedule" ":" string_literal
+                | "entropy_budget" ":" "{" { entropy_field } "}"
+                | "delegate" ":" "[" capability_ref { "," capability_ref } "]" ;
+entropy_field   = ident ":" expression ;
+(* use binds concrete access control policies to the agent *)
+agent_use       = "use" ident { "," ident } ;
+
+setting_field   = ident ":" expression ;
+
+(* --- Capability Declaration --- *)
+(* Capabilities support both abstract items (permission names with DAG edges)
+   and concrete access control rules (endpoint, binary, path policies).
+   This is the Agent OS syscall permission model:
+     - abstract items  = named permissions (like Unix rwx)
+     - endpoint rules  = network syscall filter (like seccomp for connect())
+     - binary rules    = exec syscall filter (like seccomp for execve())
+     - path rules      = filesystem syscall filter (like Landlock for open())
+     - deny ranges     = SSRF prevention (like iptables for private ranges)
+     - default policy  = default-deny posture (like SELinux enforcing mode) *)
+
+capability_decl = [ "pub" ] "capability" ident "{"
+                  { capability_member } "}" ;
+capability_member = capability_item
+                  | access_allow_rule
+                  | access_deny_rule
+                  | access_default ;
+
+(* Abstract capability items — permission DAG *)
+capability_item = ident [ "requires" ident { "," ident } ] ;
+capability_ref  = qualified_name ;
+
+(* Concrete access control rules *)
+access_allow_rule = "allow" access_target ;
+access_deny_rule  = "deny" access_target
+                  | "deny" "private_ranges" ;
+access_default    = "default" ":" ( "allow" | "deny" ) ;
+
+access_target     = "endpoint" string_literal [ "{" { field_assign } "}" ]
+                  | "binary" string_literal
+                  | "path" string_literal [ "{" { field_assign } "}" ] ;
+(* endpoint block fields: method: [GET, POST, ...], path: "/pattern/**"
+   path block fields: mode: [read, write] *)
+
+(* --- Guard Declaration --- *)
+
+guard_decl      = [ "pub" ] "guard" ident [ "(" param_list ")" ] block ;
+guardset_decl   = [ "pub" ] "guardset" ident "{"
+                  { guard_member } "}" ;
+guard_member    = "guard" ident [ "(" param_list ")" ] ;
+guard_use       = "use" ident [ "(" arg_list ")" ] ;
+
+invariant_decl  = "invariant" ident "{" expression "}" ;
+
+(* --- Taint Declaration --- *)
+
+taint_decl      = "taint" ident ;
+tainted_type    = type_expr "@" ident ;
+(* Examples: string@user_input, string@sanitized *)
+(* The "@" taint annotation extends type_expr:
+   type_expr = primary_type { "|" primary_type } [ "@" ident ] ; *)
+
+(* --- Budget Declaration --- *)
+
+budget_decl     = [ "pub" ] "budget" ident "{" { budget_field } "}" ;
+budget_field    = ident ":" expression [ ident [ "per" ident ] ] ;
+(* Examples: max_cost: 5.00 USD per task, max_tokens: 100_000 *)
+budget_inline   = "{" { budget_field } "}" ;
+
+(* --- Tool Declaration --- *)
+
+tool_decl       = { attribute } [ "pub" ] "tool" ident
+                  "(" [ param_list ] ")" [ "->" type_expr ]
+                  "{" { tool_member } "}" ;
+tool_member     = "requires" ":" "[" capability_ref { "," capability_ref } "]"
+                | "description" ":" string_literal
+                | "guard" ident [ "(" arg_list ")" ]
+                | statement ;
+
+(* --- Skill Declaration --- *)
+
+skill_decl      = { attribute } [ "pub" ] "skill" ident "{"
+                  { skill_member } "}" ;
+skill_member    = "version" ":" string_literal
+                | "author" ":" string_literal
+                | "license" ":" ident
+                | "requires" ":" "[" capability_ref { "," capability_ref } "]"
+                | "description" ":" string_literal
+                | skill_use
+                | tool_decl
+                | fn_decl ;
+skill_use       = "use" qualified_name ;
+skill_ref       = qualified_name [ version_constraint ] ;
+version_constraint = string_literal ;
+
+(* --- Prompt Declaration --- *)
+
+prompt_decl     = [ "pub" ] "prompt" ident "{"
+                  { prompt_member } "}" ;
+prompt_member   = prompt_use
+                | prompt_section
+                | prompt_params ;
+prompt_use      = "use" ident [ "(" arg_list ")" ] ;
+prompt_section  = ident [ "@" ident ] "{" { string_literal } "}" ;
+(* section names: identity, objective, constraints, output_format, context *)
+(* @ident is taint annotation: @system, @dynamic *)
+prompt_params   = "params" "{" { param_field } "}" ;
+param_field     = ident ":" type_expr [ "=" expression ] ;
+prompt_import   = "import" "(" string_literal ")" [ "{" arg_list "}" ] ;
+
+(* --- Supervisor Declaration --- *)
+
+supervisor_decl = [ "pub" ] "supervisor" ident "{"
+                  { supervisor_member } "}" ;
+supervisor_member = "strategy" ":" supervisor_strategy
+                  | "max_restarts" ":" expression "per" expression
+                  | "agents" ":" "[" supervisor_child { "," supervisor_child } "]"
+                  | "children" ":" "[" supervisor_child_ref { "," supervisor_child_ref } "]"
+                  | "budget" ":" ident
+                  | "on_max_restarts" block ;
+supervisor_strategy = "one_for_one" | "rest_for_all" | "one_for_all" ;
+supervisor_child    = ident [ "{" supervisor_child_opts "}" ] ;
+supervisor_child_ref = "supervisor" ident "{" { supervisor_member } "}" ;
+supervisor_child_opts = "restart" ":" ( "always" | "on_failure" | "never" )
+                      { "," supervisor_child_opts } ;
+
+(* --- Mesh Declaration --- *)
+
+mesh_decl       = [ "pub" ] "mesh" ident "{"
+                  { mesh_member } "}" ;
+mesh_member     = mesh_stage
+                | ident ":" expression ;
+mesh_stage      = "stage" string_literal "->" ident [ "{" { field_assign } "}" ] ;
+field_assign    = ident ":" expression ;
+
+(* --- Memory Declaration --- *)
+
+memory_decl     = [ "pub" ] "memory" ident "{"
+                  { memory_field } "}" ;
+memory_field    = "backend" ":" memory_backend
+                | "ttl" ":" expression
+                | "max_entries" ":" expression
+                | "index" ":" memory_index
+                | "access" ":" ( "read_only" | "read_write" )
+                | "taint" ":" ident
+                | "integrity" ":" ( "checksum" | "merkle_chain" )
+                | "on_corrupt" ":" ident "(" ident ")" ;
+memory_backend  = "in_memory"
+                | "sqlite" "(" string_literal ")" ;
+memory_index    = "semantic" "(" "model" ":" string_literal ")" ;
+memory_ref      = ident [ "{" { memory_field } "}" ] ;
+
+(* --- Channel Declaration --- *)
+
+channel_decl    = "channel" "<" type_expr [ "," type_expr ] ">" ident
+                  [ "{" { channel_field } "}" ] ;
+channel_field   = "buffer" ":" expression
+                | "timeout" ":" expression
+                | "on_timeout" ":" ident
+                | "on_full" ":" ( "reject" | "drop_oldest" | "block" )
+                | "mode" ":" ( "broadcast" | "append_only" )
+                | "integrity" ":" ( "merkle_chain" )
+                | "storage" ":" "persistent" "(" string_literal ")"
+                | "sign" ":" "true" ;
+
+(* --- Agent Expressions --- *)
+
+(* Add to expression: ask_expr | tell_expr *)
+
+ask_expr        = "ask" "(" expression [ "," expression ] ")" ;
+
+tell_expr       = "tell" ident expression ;
+
+(* --- Capability Delegation --- *)
+
+delegate_expr   = "delegate" "(" expression { "," expression } ")" ;
+(* delegate(cap_list [, timeout_ms]) — create a child capability set *)
+
+revoke_expr     = "revoke" "(" expression ")" ;
+(* revoke(delegation_token) — revoke a delegated capability set *)
+
+revoke_all_expr = "revoke_all" "(" ")" ;
+(* revoke_all() — revoke all delegated capability sets *)
+
+has_cap_expr    = "has_capability" "(" expression ")" ;
+(* has_capability(cap) — check if a capability is held *)
+
+(* --- Readable Syntax Sugar --- *)
+
+(* These desugar to standard constructs *)
+keep_expr       = expression "|>" "keep" "where" expression ;
+(* Desugars to: expression.filter(|item| expression) *)
+
+each_expr       = expression "|>" "each" expression ;
+(* Desugars to: expression.map(|item| expression) *)
+
+repeat_stmt     = "repeat" expression "times" block ;
+(* Desugars to: for _ in 0..expression block *)
+
+wait_expr       = "wait" "until" expression ;
+(* Desugars to: while !(expression) { yield() } *)
+
+wait_for_expr   = "wait" "for" ident ident "about" expression ;
+(* Desugars to: channel.recv() *)
+
+try_otherwise   = "try" expression "otherwise" expression ;
+(* Desugars to: match expression { Ok(v) => v, Err(_) => otherwise_expr } *)
+
+ensure_stmt     = "ensure" expression [ "," string_literal ] ;
+(* Desugars to: if !(expression) { return Err(...) } *)
+
+(* --- Secret Type --- *)
+
+(* secret<T> is a built-in generic type with special compiler rules:
+   - Does not implement Display, Debug, or Serialize
+   - Auto-zeroized on drop
+   - Constant-time comparison
+   - Cannot appear in log/print expressions *)
+
+(* --- LLM Inference Layer (v0.2) --- *)
+
+(* Agent model fields — part of agent_field *)
+(* model_field = "model" ":" string_literal
+              | "models" ":" "{" { model_binding } "}"
+              | "fallback" ":" "[" string_literal { "," string_literal } "]" ; *)
+model_binding  = ident ":" string_literal ;
+
+(* Router declaration *)
+router_decl    = [ "pub" ] "router" ident "{"
+                 { router_member } "}" ;
+router_member  = route_rule
+               | strategy_block
+               | router_field ;
+route_rule     = "route" string_literal "->" "[" ident { "," ident } "]" ;
+strategy_block = "strategy" ident "{" { strategy_field } "}" ;
+strategy_field = ident expression
+               | ident ":" expression ;
+router_field   = "health_check_interval" ":" expression
+               | "on_unhealthy" ":" ident
+               | "on_recovery" ":" ident ;
+
+(* --- Network Policy Declaration (DEPRECATED — use capability access rules instead) --- *)
+(* The old policy_decl syntax is replaced by concrete access control rules
+   inside capability declarations. See capability_member above.
+   Old: policy X { allow: [...], deny_private_ips: true }
+   New: capability X { allow endpoint "host:port" { ... }, deny private_ranges, default: deny }
+*)
+
+(* LLM expressions — used inside agent functions *)
+llm_complete   = "llm" "." "complete" "(" [ arg_list ] ")" ;
+llm_stream     = "llm" "." "stream" "(" [ arg_list ] ")" ;
+llm_embed      = "llm" "." "embed" "(" [ arg_list ] ")" ;
+llm_batch      = "llm" "." "batch" "(" [ arg_list ] ")" ;
+(* These are parsed as regular method calls on the `llm` builtin.
+   The type checker verifies arguments against CompletionRequest schema. *)
+
+(* --- Extended Keywords (v0.2) --- *)
+
+(* New keywords added for agent system and v0.2 extensions:
+   agent     guard     capability   taint     budget
+   tool      skill     prompt       supervisor  mesh
+   memory    ask       tell         ensure    invariant
+   guardset  requires  otherwise    showing   timeout
+   choices   repeat    times        wait      until
+   each      keep      where        secret    about
+   router    route     strategy    channel   settings
+   schedule  fallback  retry       gradual
+   allow     deny      break       continue  extern
+   delegate  revoke    revoke_all  has_capability
+   signal    health    metrics     progress  link
+   interface trait     comptime    task_group
+*)
+
+(* --- Built-in Functions --- *)
+
+(* The following are compiler builtins, not keywords.  They are available
+   without import and are resolved by the code generator:
+
+   I/O:              print(s), println(s)
+   CLI arguments:    arg(i), arg_count()
+   String builder:   sb_new(), sb_append(sb, s), sb_to_string(sb)
+   String utilities: len(s), contains(s, sub), starts_with(s, pfx),
+                     ends_with(s, sfx), trim(s), split(s, delim),
+                     replace(s, old, new), substr(s, start, len),
+                     to_upper(s), to_lower(s), char_at(s, i),
+                     index_of(s, sub), to_string(n)
+   Collections:      vec_new(), vec_push(v, e), vec_get(v, i), vec_len(v)
+   Conversion:       int_parse(s), float_parse(s)
+   SQL safety:       sql_escape(s)
+   JSON:             json_parse(s), json_get(j, key), json_stringify(j)
+   Math:             abs(n), min(a, b), max(a, b)
+   Delegation:       delegate(caps [, timeout]), revoke(token),
+                     revoke_all(), has_capability(cap)
+*)
