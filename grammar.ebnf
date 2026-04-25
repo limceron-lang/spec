@@ -3,8 +3,7 @@
   Version 0.2
 *)
 
-(* File extensions: .lcn (preferred), .lcn.md (Markdown-as-source)
-   Legacy: .lceron, .lceron.md — still supported *)
+(* File extensions: .lceron, .lceron.md (Markdown-as-source) *)
 
 (* ========== Top Level ========== *)
 
